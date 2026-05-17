@@ -343,18 +343,17 @@ function restart() {
 // ============================================
 // SAVE / SHARE
 // ============================================
-// modern-screenshot: SVG foreignObject 기반. 폰트·그라데이션·shadow 등이 깔끔.
-const SCREENSHOT_URL = 'https://unpkg.com/modern-screenshot@4.6.8';
-
-function loadScreenshotLib() {
-  if (window.modernScreenshot) return Promise.resolve();
-  return new Promise((resolve, reject) => {
-    const script = document.createElement('script');
-    script.src = SCREENSHOT_URL;
-    script.onload = () => resolve();
-    script.onerror = () => reject(new Error('스크린샷 라이브러리 로드 실패 (네트워크/CDN 문제)'));
-    document.head.appendChild(script);
-  });
+// ESM 동적 import 방식. esm.run이 npm 패키지를 ESM으로 변환해서 제공.
+// UMD 글로벌 이름·번들 경로 문제를 우회.
+let _msCache = null;
+async function loadScreenshotLib() {
+  if (_msCache) return _msCache;
+  try {
+    _msCache = await import('https://esm.run/modern-screenshot@4.6.8');
+    return _msCache;
+  } catch (e) {
+    throw new Error('스크린샷 라이브러리 로드 실패: ' + (e.message || e));
+  }
 }
 
 // 캡쳐 전 사용 폰트 명시적 로딩
@@ -382,20 +381,20 @@ async function captureBookAsBlob() {
   book.classList.add('capturing');
   await preloadFonts();
   await new Promise(r => setTimeout(r, 250));
-  await loadScreenshotLib();
 
-  if (!window.modernScreenshot || typeof window.modernScreenshot.domToBlob !== 'function') {
+  const ms = await loadScreenshotLib();
+
+  if (typeof ms.domToBlob !== 'function') {
     book.classList.remove('capturing');
-    throw new Error('modernScreenshot.domToBlob 함수를 찾을 수 없습니다.');
+    throw new Error('domToBlob 함수가 모듈에 없습니다. 사용 가능: ' + Object.keys(ms).join(', '));
   }
 
   let blob;
   try {
-    blob = await window.modernScreenshot.domToBlob(book, {
+    blob = await ms.domToBlob(book, {
       scale: 2,
       backgroundColor: '#ead4a8',
       type: 'image/png',
-      // 인라인으로 강제할 스타일 (그라데이션·복잡 shadow 단순화)
       style: {
         background: '#ead4a8',
         backgroundImage: 'none',

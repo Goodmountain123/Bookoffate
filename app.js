@@ -443,7 +443,7 @@ async function shareResult() {
 
       const shareData = {
         title: '운명의 서 — 이세계의 당신',
-        text: '나의 이세계 클래스가 나왔어요',
+        text: '이세계 속 당신의 운명입니다.',
         files: [file],
       };
 

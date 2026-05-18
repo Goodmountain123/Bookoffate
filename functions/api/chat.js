@@ -26,7 +26,7 @@ const CLASS_POOL = [
   '원소술사', '룬 새김장', '마법공학자',
   // 판타지 자연
   '드루이드', '정령술사', '사냥꾼', '약초사',
-   // 판타지 어둠
+  // 판타지 어둠
   '악마 사냥꾼', '뱀파이어 사냥꾼', '마녀',
   // 판타지 잠입
   '그림자 도적', '닌자', '거리의 사기꾼', '암살자', '함정 해제자', '사무라이', '역병의사', '음유시인', '조련술사', '소환술사', '해적 선장', '보물 수색자',
@@ -42,6 +42,16 @@ const CLASS_POOL = [
   '외계 종족학자', '성간항법사',
 ];
 
+function pickInspirationClasses(n = 7) {
+  // Fisher-Yates 셔플의 부분 — 매 호출마다 다른 결과
+  const pool = [...CLASS_POOL];
+  const picked = [];
+  for (let i = 0; i < n && pool.length > 0; i++) {
+    const idx = Math.floor(Math.random() * pool.length);
+    picked.push(pool.splice(idx, 1)[0]);
+  }
+  return picked;
+}
 
 // ============================================
 // 종족 풀 — 인간·하프엘프 디폴트 수렴 우회
@@ -70,6 +80,16 @@ const RACE_POOL = [
   // 외계
   '외계인',
 ];
+
+function pickInspirationRaces(n = 5) {
+  const pool = [...RACE_POOL];
+  const picked = [];
+  for (let i = 0; i < n && pool.length > 0; i++) {
+    const idx = Math.floor(Math.random() * pool.length);
+    picked.push(pool.splice(idx, 1)[0]);
+  }
+  return picked;
+}
 
 // ============================================
 // STEP 1 — 성격 분석 (MBTI 결과지 스타일)
@@ -154,11 +174,9 @@ const STEP2_SYSTEM_PROMPT = `
 - 너의 일은: 성격 분석을 깊이 읽고, 그 성격을 살아 숨쉬는 캐릭터로 **형상화**하는 것.
 - 캐릭터는 분석된 성격의 화신이지, 답변 단어의 직역이 아니다.
 
-# 동일성 차단 (★★★★★)
+# 진부함 차단 (★★★★★)
 - 두 번 같은 캐릭터를 만들면 실패다.
 - 표면 성격(외향/내향, 감정/논리 등)으로 캐릭터를 만들지 말고, 그 성격의 깊은 면 — 모순, 그늘, 갈망 — 을 중심에 두라.
-- **같은 성격이라도 시대·출신·정서적 톤이 다르면 완전히 다른 캐릭터가 된다.** 사용자 메시지의 "플레이버 시드"를 적극 반영하라.
-- 시드는 캐릭터의 배경 서사·정서·운명에 색을 입히는 역할. 성격 분석과 충돌하지 않는 한 시드를 우선 반영하라.
 
 # 출력 = 클래스 + 종족 + 태그라인 + 해설 + 주무기/보조무기 + 능력 + 퍽 + 여정
 
@@ -373,7 +391,6 @@ ${responsesText}
     const analysisText = formatAnalysis(personalityAnalysis);
     const inspirationClasses = pickInspirationClasses(7);
     const inspirationRaces = pickInspirationRaces(5);
-    const flavor = pickFlavorSeed();
 
     const character = await callOpenAI(
       env.OPENAI_API_KEY,
@@ -384,20 +401,6 @@ ${analysisText}
 
 [캐릭터의 성별 — ★★★ 반드시 반영]
 이 캐릭터는 **${genderLabel}**입니다. interpretation·journey·tagline 작성 시 이 성별에 자연스럽게 부합하도록 작성하세요. 성별을 명시적으로 반복할 필요는 없지만, 묘사·이름·역할·배경 모든 곳에 이 성별의 결이 자연스럽게 묻어나야 합니다.
-
-[이번 호출의 플레이버 시드 — 매 호출마다 다른 조합 ★★★★★]
-이번 캐릭터에 색을 입힐 시드입니다. 성격 분석과 충돌하지 않는 한, **반드시 자연스럽게 녹여 반영**하세요. 같은 성격이라도 이 시드들이 다르면 완전히 다른 캐릭터가 됩니다.
-
-- 시대 배경: ${flavor.era}
-- 정서적 톤: ${flavor.tone}
-- 출신: ${flavor.origin}
-- 시그니처 모순: ${flavor.contradiction}
-
-위 시드는 캐릭터의 배경 서사·정서·운명에 색을 입히는 역할입니다.
-· 시대 배경 → interpretation의 세계관 배경, journey 사건의 시대적 결
-· 정서적 톤 → interpretation 전체의 톤, tagline의 분위기
-· 출신 → interpretation 첫머리의 배경 서사
-· 시그니처 모순 → interpretation의 중심 통찰, 캐릭터를 입체적으로 만드는 핵심
 
 [이번 호출의 영감 클래스 후보]
 다음은 이번 호출의 클래스 영감입니다. 성격에 가장 잘 맞는 것을 고르거나, 비슷한 결로 변형하세요. 딱 맞는 게 없으면 자유롭게 다른 클래스 선택 가능. 단, **검사·마법사·전사·음유시인·도적·성기사 같은 기본 클래스는 강한 이유 없이 선택하지 마세요.**
@@ -411,11 +414,11 @@ ${analysisText}
 후보:
 - ${inspirationRaces.join('\n- ')}
 
-위 성격 분석 + 성별 + 플레이버 시드 + 영감 후보를 바탕으로, 그 성격을 살아 숨쉬는 판타지/SF 캐릭터로 형상화해주세요.
+위 성격 분석 + 성별 + 영감 후보를 바탕으로, 그 성격을 살아 숨쉬는 판타지/SF 캐릭터로 형상화해주세요.
 
 작업 순서:
 1. 먼저 className, race, tagline을 정합니다.
-2. interpretation을 작성합니다. (출신 → 시대 배경 → 여정의 계기 → 성격의 중심 통찰(시그니처 모순) 순으로, 1000자 제한, ${genderLabel} 캐릭터의 결로)
+2. interpretation을 작성합니다. (배경 서사 → 여정의 계기 → 성격의 중심 통찰 순으로, 1000자 제한, ${genderLabel} 캐릭터의 결로)
 3. interpretation을 진실로 두고 weapons, skills, perks, journey를 작성합니다.
 
 주의: 원본 심리테스트 답변은 너에게 주어지지 않았다. 오직 성격 분석만 본다.`,

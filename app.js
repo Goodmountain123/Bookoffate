@@ -289,11 +289,51 @@ async function submitToAPI() {
       throw new Error(data.error || `서버 오류 (${resp.status})`);
     }
 
+    if (data._debug) logDebugInfo(data._debug);
+
     renderResult(data);
   } catch (err) {
     console.error(err);
     showError(err.message || '알 수 없는 오류가 발생했습니다.');
   }
+}
+
+// ============================================
+// DEBUG — 1차 API 분석 결과 콘솔 출력
+// ============================================
+function logDebugInfo(debug) {
+  const a = debug.personalityAnalysis || {};
+  const dims = (a.dimensions || [])
+    .map((d, i) => `${i + 1}. ${d.name}\n   ${d.analysis}`)
+    .join('\n\n');
+
+  console.group('%c🔮 운명의 서 — 디버그 정보',
+    'background:#4a1316;color:#e9d5a8;font-weight:bold;padding:4px 10px;border-radius:3px;');
+
+  console.log('%c[성별]', 'color:#b89456;font-weight:bold;', debug.gender);
+  console.log('%c[영감 클래스 후보]', 'color:#b89456;font-weight:bold;', debug.inspirationClasses);
+  console.log('%c[영감 종족 후보]', 'color:#b89456;font-weight:bold;', debug.inspirationRaces);
+
+  console.groupCollapsed('%c[Step 1] 성격 분석 결과 (펼치기)',
+    'color:#4a1316;font-weight:bold;');
+
+  console.log('%c━━━ 요약 ━━━', 'color:#8a6b3a;font-weight:bold;');
+  console.log(a.summary || '(없음)');
+
+  console.log('\n%c━━━ 성격 차원 분석 ━━━', 'color:#8a6b3a;font-weight:bold;');
+  console.log(dims || '(없음)');
+
+  console.log('\n%c━━━ 동기·두려움·갈망 ━━━', 'color:#8a6b3a;font-weight:bold;');
+  console.log(a.motivations || '(없음)');
+
+  console.log('\n%c━━━ 그늘·모순·자신도 모르는 면 ━━━', 'color:#8a6b3a;font-weight:bold;');
+  console.log(a.shadow || '(없음)');
+
+  console.groupEnd();
+
+  console.log('%c원본 객체 (확장하여 보기):', 'color:#888;font-style:italic;', a);
+
+  console.groupEnd();
 }
 
 // ============================================

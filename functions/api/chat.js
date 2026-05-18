@@ -120,7 +120,7 @@ const STEP1_SYSTEM_PROMPT = `
 
 # 출력 구조
 - summary: 이 사람의 핵심 본질. 이 사람의 가장 본질적인 핵심을 키워드식으로 간단명료하게 표현. 테스트에서 나온 답변을 바탕으로 성격의 여러 측면을 예측
-(진보주의자, 창의적, 개인주의적, 이타적, 보수적, 등등)
+(예시 : 진보주의자, 창의적, 개인주의적, 이타적, 보수적, 등등)
 
 모든 텍스트는 한국어.
 `.trim();
@@ -132,29 +132,7 @@ const STEP1_SCHEMA = {
       type: 'string',
       description: '핵심 본질 요약. 4~6문장.',
     },
-    dimensions: {
-      type: 'array',
-      description: '6~8개 주요 성격 차원 분석',
-      items: {
-        type: 'object',
-        properties: {
-          name: { type: 'string', description: '차원 이름 (예: 에너지 방향, 의사결정 방식)' },
-          analysis: { type: 'string', description: '이 차원에서의 분석. 3~5문장.' },
-        },
-        required: ['name', 'analysis'],
-        additionalProperties: false,
-      },
-    },
-    motivations: {
-      type: 'string',
-      description: '동기·두려움·갈망. 3~5문장.',
-    },
-    shadow: {
-      type: 'string',
-      description: '본인이 잘 모르는 면, 모순, 그늘. 3~5문장.',
-    },
-  },
-  required: ['summary', 'dimensions', 'motivations', 'shadow'],
+  required: ['summary'],
   additionalProperties: false,
 };
 

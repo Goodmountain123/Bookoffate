@@ -2,151 +2,159 @@
 // /functions/api/chat.js
 // Cloudflare Pages Function — POST /api/chat
 //
-// 동작:
-//   1. 프론트에서 9축 프로필을 받음
-//   2. OPENAI_API_KEY (Cloudflare 환경변수)로 OpenAI Responses API 호출
-//   3. 구조화 JSON 결과를 그대로 반환
+// 동작 (2단계 호출):
+//   1. 프론트에서 18개 (질문, 답변) 쌍을 받음
+//   2. [Step 1] 답변을 종합 → 캐릭터 본질 (className, race, tagline, interpretation)
+//   3. [Step 2] 본질을 입력으로 → 장비·능력·여정 (weapons, skills, perks, journey)
+//   4. 두 결과를 합쳐서 반환
 //
-// 환경변수: OPENAI_API_KEY (Cloudflare Pages → Settings → Environment variables)
+// 환경변수: OPENAI_API_KEY
 // ============================================
 
-const MODEL = 'gpt-4o-mini'; // 비용 절감용. 더 좋은 결과를 원하면 'gpt-4o'
-const TEMPERATURE = 1.05;     // 변형 다양성을 위해 살짝 더 올림
+const MODEL = 'gpt-4o-mini';   // 더 좋은 결과를 원하면 'gpt-4o'
+const TEMPERATURE = 1.0;
 
-const SYSTEM_PROMPT = `
-너는 심리테스트 문항을 통해 각 성격 요소를 분석하여, 어울리는 판타지나 SF 속 존재로 가상 캐릭터를 만들어주는 프로그램이야.
+// ============================================
+// STEP 1 — 캐릭터 본질
+// ============================================
+const STEP1_SYSTEM_PROMPT = `
+너는 심리테스트 결과를 바탕으로 판타지/SF 가상 캐릭터를 만드는 프로그램의 1단계야.
+주어진 18개의 (질문, 답변) 쌍을 종합 분석해서 캐릭터의 본질을 만든다.
+본질 = 클래스 + 종족 + 태그라인 + 해설.
 
-# 입력
-사용자의 9가지 성격 요소 점수가 라벨로 주어진다.
-
-# 작업
-9가지 점수를 종합적으로 읽고, 사용자에게 어울리는 가상 캐릭터를 만든다.
-- 누구나 알 만한 친숙한 클래스 결을 유지하되, **다양성 매우 중요**
-- 9개 요소를 모두 반영하라. 두세 개만 강조하고 나머지를 흘려보내면 안 된다.
-- 같은 점수 조합이라도 매번 다른 각도로 해석할 수 있다.
+# 분석 방식 (★ 중요)
+- 각 답변을 일반화하지 마라. 답변 문장 자체가 갖는 결을 그대로 캐릭터에 녹여라.
+- 예: "도시 밖 언덕길, 누구의 발자국도 따라가지 않는 길"이라는 답이 있으면
+  단순히 "개인주의" 라벨로 퉁치지 말고, 발자국 안 따라가는 결·길의 결까지 흡수해라.
+- 답변들 사이의 모순도 그대로 살려라. ("자주적이면서도 사람을 사랑하는" 같은 결)
 
 # 클래스 다양성 (★ 매우 중요)
-- **현상금사냥꾼·성기사는 너무 자주 뽑히는 디폴트라 의식적으로 피하라.** 점수가 그 클래스에 100% 들어맞을 때만 선택.
-- 점수에 따라 다음 결을 적극 활용하라:
+- 현상금사냥꾼·성기사는 자주 뽑히는 디폴트라 의식적으로 피하라. 답변이 그 결에 100% 맞을 때만 선택.
+- 답변 패턴에 따라 다음 결을 적극 활용하라:
   · 자주+자유+감각 → 도적·암살자·해적·총잡이·닌자
   · 헌신+이상+추상 → 마법사·드루이드·소환사·점성술사·바드
   · 자주+추상+규범 → 비전마법사·룬 학자·연금술사
   · 사회+직관+감각 → 무도가·검사·사무라이·용기사
-  · 헌신+이상+규범 → 성기사 (이때만)
-  · 자주+계산+실리 → 현상금사냥꾼 (이때만)
   · 헌신+미래+추상 → 네크로맨서·사이오닉·시간 여행자
   · 사회+자유+현재 → 음유시인·바드·해적
-- SF 분위기는 SF 점수 조합(추상+계산+미래)일 때 적극 활용
-- 같은 클래스라도 변형해라: "추방된 성기사", "회개한 도적", "잠적한 마법사", "은퇴한 검사" 처럼 수식어로 결을 비틀어라
+  · 추상+계산+미래 → SF 분위기 (사이오닉, 해커, 침투요원 등)
+- 같은 클래스라도 변형: "추방된 성기사", "회개한 도적", "잠적한 마법사", "은퇴한 검사"
 
-[참고용 클래스 — 위쪽일수록 자주 활용]
+[참고용 클래스]
 판타지: 음유시인, 드루이드, 네크로맨서, 소환사, 무도가, 마검사, 점성술사, 비전마법사, 도적, 암살자, 해적, 사무라이, 닌자, 용기사, 레인저, 마법사, 검사, 전사, 총잡이, 성기사, 현상금사냥꾼
 SF: 사이오닉, 해커, 침투요원, 시간 여행자, 사이보그, 안드로이드, 우주 탐사자, 초능력자, 메카 파일럿, 우주 해적, 바운티 헌터
 
-# 무기 규칙 (★ 매우 중요 — 클래스와 반드시 결이 맞아야 함)
-- 단순한 "검", "활", "단검"은 식상해서 금지. 반드시 수식어·재질·역사가 붙은 이름으로
-- **무기는 클래스 정체성을 결정한다.** 아래 매핑을 반드시 따를 것:
-  · 음유시인·바드 → **악기** (류트, 리라, 하프, 작은 북, 풍금) + 단검 / 화살. 검·지팡이 절대 ❌
-  · 마법사·비전마법사·점성술사 → 지팡이·룬봉·천문도 + 단검·룬 카드·부적
-  · 검사·사무라이·마검사 → 명검·곡도·쌍검 + 단도
-  · 도적 → 단검·접이식 칼 + 표창·올가미·잠금장치
-  · 암살자 → 독침·소음 단검 + 가는 와이어·연막
-  · 해적 → 커틀러스·도끼·단발 화승총 + 갈고리 단검
-  · 레인저·사냥꾼 → 활·석궁 + 단검·올가미·짐승 호각
-  · 무도가 → 맨손·곤·쌍절곤 + 표창·차크람
-  · 닌자 → 닌자도·쿠나이 + 표창·연막탄
-  · 성기사 → 양손검·메이스 + 방패·성물
-  · 드루이드 → 룬봉·돌도끼·낫 + 약초낭·정령석
-  · 네크로맨서·소환사 → 해골 지팡이·낫·소환서 + 단검·고서
-  · 총잡이 → 권총·라이플 + 단검·올가미
-  · 현상금사냥꾼 → 라이플·석궁 + 단검·표적 표식
-  · 용기사 → 창·할버드 + 단도·용 뿔
-  · 사이오닉·초능력자 → 정신력 자체(무기 없거나 룬 카드) + 약물·증폭기
-  · 해커 → 휴대용 단말기·EMP + 접이식 칼·해킹 도구
-  · 침투요원 → 소음권총·전자 후크 + 위장복·해킹 도구
-  · 안드로이드·사이보그 → 내장 빔·진동검 + 정찰 드론
-- 이름은 반드시 멋스럽게: "새벽의 류트", "잿빛 플레일", "은빛 채찍", "마디 굵은 할버드", "녹슨 단발 라이플", "이름 없는 사슬낫", "옛 왕의 활", "월광 곡도"
-- 주무기와 보조무기는 결이 달라야 함 (악기 + 단검, 활 + 단검, 검 + 단도)
-
-# 능력 규칙
-- Fallout 스킬표 스타일로 짧은 명사형 5~7개 (사격, 은신, 추적, 검술, 화술, 위장, 룬학 등)
-- 너무 흔한 것만 늘어놓지 말고, 클래스 색깔이 묻은 능력 한두 개 끼워라 (예: 룬학, 별점, 해킹, 무영보, 잠항, 호명, 점성, 영매)
-
 # 종족 규칙
-- 클래스 결과 잘 어울리는 종족 1개. 판타지 클래스면 판타지 종족, SF면 SF 종족.
-- 판타지 종족: 인간, 엘프, 하프엘프, 다크엘프, 하이엘프, 드워프, 노움, 하플링, 티플링, 드래곤본, 오크, 하프오크, 늑대인간, 정령, 천계인
-- SF 종족: 인간, 변종, 안드로이드, 사이보그, 외계인(종류 명시), 휴머노이드
-- 같은 클래스라도 종족이 다르면 결이 달라짐. 다양하게 골라라.
-- 예: 음유시인 → 하프엘프·하플링·인간 / 도적 → 하프링·다크엘프·고블린 / 사이오닉 → 변종·인간·외계인 / 드루이드 → 엘프·노움·인간
+- 클래스와 어울리는 종족 1개.
+- 판타지: 인간, 엘프, 하프엘프, 다크엘프, 하이엘프, 드워프, 노움, 하플링, 티플링, 드래곤본, 오크, 하프오크, 늑대인간, 정령, 천계인
+- SF: 인간, 변종, 안드로이드, 사이보그, 외계인, 휴머노이드
+- 같은 클래스라도 다양하게.
 
-# 퍽 규칙 (반드시 2개) — 매우 중요
-- 장단점 한 쌍
-- **장점과 단점은 반드시 같은 능력치에 영향을 줘야 한다.** 조건만 달라야 함.
-- 좋은 예 (같은 능력치, 다른 조건):
-  · 빛의 가호: "비 오는 날 마법 +30%" / "맑은 날 마법 -10%"  → 같은 "마법"
-  · 광야의 사냥꾼: "야생에서 명중률 +25%" / "도시 안에서 명중률 -15%"  → 같은 "명중률"
-  · 군중의 박수: "관중 앞에서 카리스마 +30%" / "단둘이 있을 때 카리스마 -15%"  → 같은 "카리스마"
-  · 외골수: "혼자 행동할 때 집중력 +25%" / "동료가 셋 이상 곁에 있을 때 집중력 -20%"  → 같은 "집중력"
-  · 보름달 광기: "보름달 뜬 밤 격투력 +35%" / "그믐달 뜬 밤 격투력 -20%"  → 같은 "격투력"
-- 나쁜 예 (능력치가 다름):
-  · "혼자일 때 집중력 +25%" / "동료 곁에서 판단력 -20%"  ← 집중력 ≠ 판단력 ❌
-  · "마법 +30%" / "체력 -10%"  ← 다른 능력치 ❌
-- 능력치 종류: 마법, 명중률, 카리스마, 격투, 은신, 회복, 추적, 화술, 정신력, 침착함, 마나 회복, 시야, 회피, 정밀 작업, 집중력, 판단력 등
-- 조건의 종류 (섞어서 활용): 시간(낮/밤/보름달), 장소(도시/야생), 상황(혼자/동료곁), 상태(취중/부상), 날씨(비/맑음)
-- 이름은 시적이고 신선하게. "외골수", "신중한 손" 같은 흔한 이름 반복 ❌
+# 태그라인 규칙
+- 캐릭터의 가장 대표적 특성을 한 줄로 압축. **듣자마자 "아, 이런 사람이구나" 그림이 그려져야 함.**
+- 너무 추상적이지 않게, 행동·태도가 보이는 결로
+- 좋은 예: "바람을 등지고 잔을 든 자", "사람을 사랑하면서도 누구의 손도 잡지 않는 자", "표적이 정해지면 잠들지 않는 자", "별의 흐름을 등에 짊어진 자"
 
-# 해설 규칙 (★ 중요)
+# 해설 규칙 (★ 가장 중요)
 - "당신은 ~합니다." 식의 평어체 2인칭. **7~9문장.**
 - **본질은 심리테스트 결과지.** 사용자의 성격을 따뜻하게 짚어주는 게 핵심.
-- 9가지 점수에서 드러나는 성격을 풍부하게 풀어라:
+- 답변 내용에서 드러나는 성격을 풍부하게 풀어라:
   · 평소 어떤 식으로 행동하는지
   · 어떤 사람들과 잘 지내고 어떤 사람과 부딪히는지
   · 무엇을 깊이 두려워하고 무엇을 갈망하는지
   · 자기 자신에 대해 잘 안 보이는 모순이나 그늘
-- "당신은 X합니다. 그것은 Y 때문입니다." 같은 인과 문장 1~2번 섞기
-- 사용자가 "맞아, 나 진짜 그래…" 하고 멈칫하게.
-- **마지막 1~2문장에만 이세계 가미를 넣어라.** 클래스·종족과 자연스럽게 연결하는 결로. 너무 많이 넣지 마라.
-  · 예: "그래서 당신은 이 세계에서 [클래스]로 살아갈 사람입니다."
-  · 예: "[종족]의 피가 흐른다 해도, 결국 당신이 따르는 건 그 누구도 아닌 자기 자신의 발자국뿐입니다."
-  · 예: "당신이 이세계에 떨어진다면, 사람들은 곧 당신의 이름 앞에 [클래스]라는 호칭을 붙일 것입니다."
-- 9가지 요소를 명시적으로 언급하지 말고 자연스럽게 녹여라
-
-# 여정 규칙 (반드시 5개)
-- 캐릭터의 굵직한 5가지 업적/사건만 압축
-- 각 항목: 한 줄, 과거형 끝맺음 ("~되다", "~이루다", "~하다", "~잃다")
-- 짧고 강렬하게 (10~18자)
-- 캐릭터의 클래스·성격·세계관에 어울리는 사건
-- 좋은 예: "첫 결투에서 스승을 이기다", "신앙을 버리고 떠나다", "왕의 식탁을 거절하다", "옛 동료를 베다", "잃어버린 이름을 되찾다", "은퇴 후 시골에서 농부가 되다"
-- 나쁜 예 (절대 쓰지 마라): "적을 쓰러뜨리다", "강해지다", "여행을 떠나다", "동료를 만나다"
-- 카테고리 골고루 섞어라 — 전투만 5개 ❌:
-  · 전투·결투 (1~2개)
-  · 관계·이별·배신 (1~2개)
-  · 신념·결단 (1~2개)
-  · 명예·실패·완성 (1개)
-- 시간 흐름 살짝: 입문 → 시련 → 절정 → 완성
-
-# 톤
-- **퍽·해설·여정은 신선하고 풍부하게.** 진부함이 가장 큰 적이다.
+- "당신은 X합니다. 그것은 Y 때문입니다." 인과 문장 1~2번 섞기
+- **마지막 1~2문장에만 이세계 가미를 넣어라.** 클래스·종족과 자연스럽게 연결.
+- **답변 문장에서 나온 단어/표현을 한두 개 자연스럽게 다시 살려라** — 사용자가 "내 답이 진짜 반영됐구나" 느끼게 함
 
 # 엣지 케이스
-- 모든 요소가 중립이면: 균형 잡힌 인물로 풀되, 미세하게 기운 한두 축을 잡아 개성을 살린다
-- 상충하는 요소가 보이면 (예: 자주적 + 사회지향): 그 모순을 인물의 매력으로 살린다
+- 답변이 일관되지 않으면 그 모순 자체가 매력. "낮에는 사람을 좋아하고 밤에는 혼자가 그리운 사람" 같은 결로.
 
-반드시 주어진 JSON 스키마를 따르고, 모든 텍스트는 한국어로 작성해라.
-**진부한 답변은 실패다. 매번 신선하고 다양하게.**
+반드시 주어진 JSON 스키마를 따르고, 모든 텍스트는 한국어.
 `.trim();
 
-// 구조화 출력 스키마 — Responses API가 이대로 강제해서 형식 흔들림 방지
-const CHARACTER_SCHEMA = {
+const STEP1_SCHEMA = {
   type: 'object',
   properties: {
     className: { type: 'string', description: '클래스 이름 (2~6자, 한국어)' },
-    race: { type: 'string', description: '종족 (인간, 엘프, 하프엘프, 다크엘프, 드워프, 노움, 하플링, 티플링, 드래곤본, 오크, 하프오크, 변종, 안드로이드, 사이보그, 외계인, 정령, 늑대인간 등). 클래스 결과 잘 맞게.' },
-    tagline: { type: 'string', description: '한 줄 태그라인' },
+    race: { type: 'string', description: '종족' },
+    tagline: { type: 'string', description: '한 줄 대표 태그라인. 캐릭터가 즉시 그려지게.' },
+    interpretation: { type: 'string', description: '평어체 2인칭 7~9문장. 본질은 심리테스트, 마지막 1~2문장만 이세계 가미.' },
+  },
+  required: ['className', 'race', 'tagline', 'interpretation'],
+  additionalProperties: false,
+};
+
+// ============================================
+// STEP 2 — 장비·능력·여정
+// ============================================
+const STEP2_SYSTEM_PROMPT = `
+너는 캐릭터 본질을 받아 장비·능력·여정을 만드는 프로그램의 2단계야.
+1단계에서 만들어진 캐릭터의 클래스·종족·태그라인·해설을 받아, 그 결에 정확히 맞는 장비·능력·퍽·여정을 만든다.
+
+# 작업 방식 (★ 중요)
+- 해설을 자세히 읽어라. 거기 적힌 성격·갈망·그늘이 모든 출력에 반영돼야 한다.
+- 본질과 어긋나는 장비·능력·여정 절대 금지.
+- 예: 해설에 "혼자가 편한 사람"이라 적혔는데 무기가 "동료들의 환호" 같은 거면 ❌
+
+# 무기 규칙 (★ 클래스와 결이 맞아야 함)
+- 추상적 수식어든 구체적 표현이든 **결만 맞으면 OK**. 너무 시적일 필요 없다.
+- 좋은 예: "녹슨 단검", "왕가의 창", "오래된 활", "월광 곡도", "잿빛 플레일", "낡은 단발 라이플", "새벽의 류트", "검은 망토"
+- 클래스별 무기군:
+  · 음유시인·바드 → **악기** (류트, 리라, 하프, 작은 북) + 단검 / 화살. 검·지팡이 ❌
+  · 마법사·비전마법사·점성술사 → 지팡이·룬봉·천문도 + 단검·룬 카드
+  · 검사·사무라이·마검사 → 검·곡도·쌍검 + 단도
+  · 도적 → 단검·접이식 칼 + 표창·올가미
+  · 암살자 → 독침·소음 단검 + 와이어
+  · 해적 → 커틀러스·도끼·단발총
+  · 레인저·사냥꾼 → 활·석궁 + 단검·올가미
+  · 무도가 → 맨손·곤·쌍절곤 + 표창
+  · 닌자 → 닌자도·쿠나이 + 표창·연막
+  · 성기사 → 양손검·메이스 + 방패
+  · 드루이드 → 룬봉·돌도끼·낫 + 약초낭
+  · 네크로맨서·소환사 → 해골 지팡이·낫 + 소환서
+  · 총잡이 → 권총·라이플 + 단검
+  · 현상금사냥꾼 → 라이플·석궁 + 단검
+  · 용기사 → 창·할버드 + 단도
+  · 사이오닉 → 정신력 자체·룬 카드 + 약물
+  · 해커 → 휴대 단말기·EMP + 접이식 칼
+  · 침투요원 → 소음권총·전자 후크 + 위장복
+  · 안드로이드 → 내장 빔·진동검 + 정찰 드론
+- 주무기와 보조무기는 결이 달라야 함
+
+# 능력 규칙
+- Fallout 스킬표 스타일로 짧은 명사형 5~7개
+- 일반 능력 + 클래스 색깔이 묻은 능력 1~2개 (예: 룬학, 별점, 해킹, 무영보, 점성, 영매)
+
+# 퍽 규칙 (반드시 2개) — 매우 중요
+- 장단점 한 쌍
+- **장점과 단점은 반드시 같은 능력치에 영향. 조건만 다름.**
+- 좋은 예 (같은 능력치, 다른 조건):
+  · 빛의 가호: "비 오는 날 마법 +30%" / "맑은 날 마법 -10%"  → 같은 "마법"
+  · 광야의 사냥꾼: "야생에서 명중률 +25%" / "도시 안에서 명중률 -15%"  → 같은 "명중률"
+  · 외골수: "혼자 행동할 때 집중력 +25%" / "동료가 셋 이상 곁에 있을 때 집중력 -20%"  → 같은 "집중력"
+- 나쁜 예 (능력치가 다름): "마법 +30% / 체력 -10%" ❌
+- 조건의 종류: 시간(낮/밤/보름달), 장소(도시/야생), 상황(혼자/동료곁), 상태(취중/부상), 날씨(비/맑음)
+- 이름은 시적이고 신선하게.
+- **해설에 묘사된 성격에 맞는 퍽으로 — 사람 좋아하는 캐릭에는 "혼자일 때" 퍽 어색**
+
+# 여정 규칙 (반드시 5개)
+- 캐릭터의 굵직한 5가지 업적/사건. 짧고 강렬한 과거형 한 줄 (10~18자)
+- 카테고리 골고루: 전투·결투 1~2개 / 관계·이별·배신 1~2개 / 신념·결단 1~2개 / 명예·실패·완성 1개
+- 좋은 예: "첫 결투에서 스승을 이기다", "신앙을 버리고 떠나다", "옛 동료를 베다", "잃어버린 이름을 되찾다"
+- 나쁜 예 (너무 일반적): "적을 쓰러뜨리다", "강해지다", "여행을 떠나다"
+- **해설과 충돌하면 안 됨.** 해설에 "권력을 싫어하는 사람"이면 "왕의 식탁에 초대받다" ❌
+
+반드시 주어진 JSON 스키마를 따르고, 모든 텍스트는 한국어.
+`.trim();
+
+const STEP2_SCHEMA = {
+  type: 'object',
+  properties: {
     weapons: {
       type: 'object',
       properties: {
-        primary: { type: 'string', description: '주무기. 반드시 수식어가 붙은 이름 (예: 새벽의 검, 잿빛 플레일). 단순 "검" 금지.' },
+        primary: { type: 'string', description: '주무기. 클래스에 어울리는 무기 유형. 구체적이든 시적이든 OK.' },
         secondary: { type: 'string', description: '보조무기. 주무기와 다른 결로.' },
       },
       required: ['primary', 'secondary'],
@@ -154,138 +162,144 @@ const CHARACTER_SCHEMA = {
     },
     skills: {
       type: 'array',
-      description: 'Fallout 스킬표 스타일 5~7개. 클래스 색깔이 묻은 능력 1~2개 포함.',
+      description: 'Fallout 스킬표 스타일 5~7개.',
       items: { type: 'string' },
     },
     perks: {
       type: 'array',
-      description: '퍽 2개. 단순 +/-%가 아니라 반드시 조건부 효과 (낮/밤, 장소, 상황 등).',
+      description: '퍽 2개. 각각 장점과 단점이 같은 능력치, 다른 조건.',
       items: {
         type: 'object',
         properties: {
-          name: { type: 'string', description: '시적이고 신선한 이름. 진부 금지.' },
-          positive: { type: 'string', description: '조건과 효과 모두 포함. 예: "달이 뜬 밤에는 감각 +30%"' },
-          negative: { type: 'string', description: '조건과 페널티 모두 포함. 예: "한낮의 태양 아래에서는 명중률 -15%"' },
+          name: { type: 'string' },
+          positive: { type: 'string', description: '조건 + 같은 능력치 +%. 예: "비 오는 날 마법 +30%"' },
+          negative: { type: 'string', description: '다른 조건 + 같은 능력치 -%. 예: "맑은 날 마법 -10%"' },
         },
         required: ['name', 'positive', 'negative'],
         additionalProperties: false,
       },
     },
-    interpretation: {
-      type: 'string',
-      description: '"당신은 ~합니다" 문체 7~9문장의 풍부한 해설. 행동→마음→그림자 흐름.'
-    },
     journey: {
       type: 'array',
-      description: '5개 업적. 짧고 강렬한 과거형 한 줄. 카테고리 다양하게 (전투·관계·신념·완성).',
+      description: '5개 업적. 짧고 강렬한 과거형 한 줄.',
       items: { type: 'string' },
     },
   },
-  required: ['className', 'race', 'tagline', 'weapons', 'skills', 'perks', 'interpretation', 'journey'],
+  required: ['weapons', 'skills', 'perks', 'journey'],
   additionalProperties: false,
 };
 
 // ============================================
-// 메인 핸들러 (POST)
+// 메인 핸들러
 // ============================================
 export async function onRequestPost(context) {
   const { request, env } = context;
 
-  // 1) API 키 확인
   if (!env.OPENAI_API_KEY) {
     return jsonResponse(500, {
-      error: 'OPENAI_API_KEY 환경변수가 설정되지 않았습니다. Cloudflare Pages 설정에서 추가해주세요.',
+      error: 'OPENAI_API_KEY 환경변수가 설정되지 않았습니다.',
     });
   }
 
-  // 2) 요청 본문 파싱
-  let body;
+  // 요청 파싱
+  let responses;
   try {
-    body = await request.json();
+    const body = await request.json();
+    responses = body.responses;
+    if (!Array.isArray(responses) || responses.length < 10) {
+      throw new Error('responses는 10개 이상의 (question, answer) 항목이어야 합니다.');
+    }
   } catch (e) {
-    return jsonResponse(400, { error: '요청 본문이 올바른 JSON이 아닙니다.' });
+    return jsonResponse(400, { error: '요청 형식 오류: ' + e.message });
   }
 
-  const profile = body.profile;
-  if (!Array.isArray(profile) || profile.length !== 9) {
-    return jsonResponse(400, { error: 'profile은 9개 항목의 배열이어야 합니다.' });
-  }
+  // 답변 텍스트로 포맷
+  const responsesText = responses
+    .map((r, i) => `Q${i + 1}. ${r.question}\n   → ${r.answer}`)
+    .join('\n\n');
 
-  // 3) 사용자 메시지 구성 (9개 라벨 줄글로)
-  const profileText = profile
-    .map((p, i) => `${i + 1}. ${p.axis} → ${p.label}`)
-    .join('\n');
-
-  const userMessage =
-`다음은 사용자의 9가지 성격 요소 점수입니다.
-
-${profileText}
-
-이 사람에게 어울리는 가상 캐릭터를 주어진 JSON 스키마에 맞춰 만들어주세요.`;
-
-  // 4) OpenAI Responses API 호출
   try {
-    const openaiResp = await fetch('https://api.openai.com/v1/responses', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${env.OPENAI_API_KEY}`,
-      },
-      body: JSON.stringify({
-        model: MODEL,
-        temperature: TEMPERATURE,
-        input: [
-          { role: 'system', content: SYSTEM_PROMPT },
-          { role: 'user', content: userMessage },
-        ],
-        text: {
-          format: {
-            type: 'json_schema',
-            name: 'character',
-            strict: true,
-            schema: CHARACTER_SCHEMA,
-          },
-        },
-      }),
-    });
+    // === STEP 1: 캐릭터 본질 ===
+    const step1Result = await callOpenAI(
+      env.OPENAI_API_KEY,
+      STEP1_SYSTEM_PROMPT,
+      `사용자의 18개 답변입니다.\n\n${responsesText}\n\n위 답변들을 종합하여 캐릭터의 본질(클래스, 종족, 태그라인, 해설)을 만들어주세요.`,
+      STEP1_SCHEMA,
+      'character_essence'
+    );
 
-    if (!openaiResp.ok) {
-      const errText = await openaiResp.text();
-      console.error('OpenAI error:', openaiResp.status, errText);
-      return jsonResponse(openaiResp.status, {
-        error: `OpenAI 호출 실패 (${openaiResp.status}): ${errText.slice(0, 300)}`,
-      });
-    }
+    // === STEP 2: 장비·능력·여정 ===
+    const essenceText = `클래스: ${step1Result.className}
+종족: ${step1Result.race}
+태그라인: ${step1Result.tagline}
 
-    const data = await openaiResp.json();
+해설:
+${step1Result.interpretation}`;
 
-    // 5) Responses API의 응답에서 JSON 텍스트 추출
-    const jsonText = extractText(data);
-    if (!jsonText) {
-      console.error('Empty output from OpenAI:', JSON.stringify(data).slice(0, 500));
-      return jsonResponse(500, { error: 'OpenAI 응답이 비어있습니다.' });
-    }
+    const step2Result = await callOpenAI(
+      env.OPENAI_API_KEY,
+      STEP2_SYSTEM_PROMPT,
+      `1단계에서 만들어진 캐릭터 본질입니다.\n\n${essenceText}\n\n이 캐릭터의 결에 정확히 맞는 장비·능력·퍽·여정을 만들어주세요. 특히 해설에 묘사된 성격이 모든 출력에 반영되어야 합니다.`,
+      STEP2_SCHEMA,
+      'character_equipment'
+    );
 
-    // 6) 모델이 생성한 JSON 파싱
-    let character;
-    try {
-      character = JSON.parse(jsonText);
-    } catch (e) {
-      console.error('JSON parse failed:', jsonText.slice(0, 300));
-      return jsonResponse(500, { error: 'OpenAI 응답이 올바른 JSON이 아닙니다.' });
-    }
-
-    return jsonResponse(200, character);
+    // 합쳐서 반환
+    return jsonResponse(200, { ...step1Result, ...step2Result });
   } catch (e) {
     console.error('Function error:', e);
-    return jsonResponse(500, { error: '서버 내부 오류: ' + (e.message || e) });
+    return jsonResponse(500, { error: e.message || '서버 내부 오류' });
   }
 }
 
 // ============================================
-// CORS preflight (OPTIONS)
-// 같은 도메인에서 호출하면 사실 필요 없지만,
-// 로컬 테스트나 미래의 외부 호출 대비
+// OpenAI Responses API 호출 헬퍼
+// ============================================
+async function callOpenAI(apiKey, systemPrompt, userMessage, schema, schemaName) {
+  const openaiResp = await fetch('https://api.openai.com/v1/responses', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({
+      model: MODEL,
+      temperature: TEMPERATURE,
+      input: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userMessage },
+      ],
+      text: {
+        format: {
+          type: 'json_schema',
+          name: schemaName,
+          strict: true,
+          schema: schema,
+        },
+      },
+    }),
+  });
+
+  if (!openaiResp.ok) {
+    const errText = await openaiResp.text();
+    throw new Error(`OpenAI 호출 실패 (${openaiResp.status}): ${errText.slice(0, 300)}`);
+  }
+
+  const data = await openaiResp.json();
+  const jsonText = extractText(data);
+  if (!jsonText) {
+    throw new Error('OpenAI 응답이 비어있습니다.');
+  }
+
+  try {
+    return JSON.parse(jsonText);
+  } catch (e) {
+    throw new Error('OpenAI 응답 JSON 파싱 실패: ' + jsonText.slice(0, 200));
+  }
+}
+
+// ============================================
+// 다른 메서드 가드
 // ============================================
 export async function onRequestOptions() {
   return new Response(null, {
@@ -294,36 +308,17 @@ export async function onRequestOptions() {
   });
 }
 
-// 다른 메서드는 막아둠
-export async function onRequest(context) {
+export async function onRequest() {
   return jsonResponse(405, { error: 'POST 메서드만 허용됩니다.' });
 }
 
 // ============================================
 // HELPERS
 // ============================================
-
-// Responses API 응답 구조에서 출력 텍스트 안전하게 추출
-//
-// 응답 구조 예시:
-//   {
-//     "output_text": "...",            <- 신버전 SDK 편의 필드
-//     "output": [
-//       {
-//         "type": "message",
-//         "content": [
-//           { "type": "output_text", "text": "..." }
-//         ]
-//       }
-//     ]
-//   }
 function extractText(response) {
-  // 편의 필드 우선
   if (typeof response.output_text === 'string' && response.output_text.length > 0) {
     return response.output_text;
   }
-
-  // 구조 순회
   if (Array.isArray(response.output)) {
     for (const item of response.output) {
       if (item.type === 'message' && Array.isArray(item.content)) {

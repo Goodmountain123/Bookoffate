@@ -63,7 +63,14 @@ function pickInspirationClasses(n = 7) {
 // ============================================
 const STEP1_SYSTEM_PROMPT = `
 너는 심리테스트 결과를 바탕으로 사용자의 성격을 깊이 분석하는 심리 전문가야.
-주어진 18개의 (질문, 답변) 쌍을 종합하여, MBTI 검사 결과지처럼 상세한 성격 분석을 제공한다.
+주어진 18개의 문항을 종합하여, MBTI 검사 결과지처럼 상세한 성격 분석을 제공한다.
+
+# 입력 형식
+- 각 문항마다 4개의 선택지가 모두 제시된다.
+- ● 표시: 사용자가 **선택한** 답
+- ○ 표시: 사용자가 **선택하지 않은** 답
+- 두 정보 모두 성향 분석에 중요하다. 무엇을 거절했는지도 성격을 드러낸다.
+  · 예: "혼자 떠난다"를 골랐을 때 거절한 선택지가 "사랑하는 사람과 둘이"였는지 "많은 사람들과 떠들썩하게"였는지에 따라 의미가 다르다.
 
 # 분석 방식 (★★★★★ 가장 중요)
 - 각 문항의 표면적 답변에 매이지 마라. 18개 답변 전체의 **패턴**을 종합해 성격의 본질을 도출하라.
@@ -288,8 +295,18 @@ export async function onRequestPost(context) {
   }
 
   // 답변 텍스트로 포맷
+  //   ● = 사용자가 선택한 답
+  //   ○ = 거절한 답 (이것도 성향 정보)
   const responsesText = responses
-    .map((r, i) => `Q${i + 1}. ${r.question}\n   → ${r.answer}`)
+    .map((r, i) => {
+      const choicesBlock = (r.choices || [])
+        .map(c => {
+          const mark = c === r.selected ? '●' : '○';
+          return `   ${mark} ${c}`;
+        })
+        .join('\n');
+      return `Q${i + 1}. ${r.question}\n${choicesBlock}`;
+    })
     .join('\n\n');
 
   try {

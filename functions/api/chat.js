@@ -82,7 +82,6 @@ const RACE_POOL = [
   '안드로이드', '복제인간', 
   // 외계
   '외계인',
-  // 기타
 ];
 
 function pickInspirationRaces(n = 5) {

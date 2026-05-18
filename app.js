@@ -152,7 +152,7 @@ const JOURNEY_MARKS = ['Ⅰ', 'Ⅱ', 'Ⅲ', 'Ⅳ', 'Ⅴ', 'Ⅵ', 'Ⅶ', 'Ⅷ', '
 // STATE
 // ============================================
 let currentQ = 0;
-const scores = new Array(9).fill(0);
+const responses = []; // [{question, answer}, ...]
 
 // ============================================
 // SCREEN NAV
@@ -168,7 +168,7 @@ function show(screenId) {
 // ============================================
 function startQuiz() {
   currentQ = 0;
-  scores.fill(0);
+  responses.length = 0;
   show('screen-quiz');
   renderQuestion();
 }
@@ -187,43 +187,26 @@ function renderQuestion() {
     btn.type = 'button';
     btn.setAttribute('data-mark', MARKS[i]);
     btn.textContent = c.text;
-    btn.addEventListener('click', () => chooseAnswer(c.score, btn));
+    btn.addEventListener('click', () => chooseAnswer(c.text));
     choicesEl.appendChild(btn);
   });
 }
 
-function chooseAnswer(score, clickedBtn) {
+function chooseAnswer(answerText) {
   // 중복 클릭 방지
   document.querySelectorAll('#qChoices .choice').forEach(b => b.disabled = true);
 
-  scores[QUESTIONS[currentQ].axis] += score;
+  responses.push({
+    question: QUESTIONS[currentQ].text,
+    answer: answerText,
+  });
   currentQ++;
 
   if (currentQ >= QUESTIONS.length) {
     submitToAPI();
   } else {
-    // 살짝 딜레이 후 다음 문항 (페이지 넘어가는 느낌)
     setTimeout(() => renderQuestion(), 180);
   }
-}
-
-// ============================================
-// SCORE → LABEL
-// ============================================
-function toLabel(score, axis) {
-  if (score >= 3)  return `강한 ${axis.left}`;
-  if (score >= 1)  return `약한 ${axis.left}`;
-  if (score === 0) return `중립`;
-  if (score >= -2) return `약한 ${axis.right}`;
-  return `강한 ${axis.right}`;
-}
-
-function buildProfile() {
-  return scores.map((s, i) => ({
-    axis: `${AXES[i].left} ↔ ${AXES[i].right}`,
-    label: toLabel(s, AXES[i]),
-    raw: s,
-  }));
 }
 
 // ============================================
@@ -231,13 +214,12 @@ function buildProfile() {
 // ============================================
 async function submitToAPI() {
   show('screen-loading');
-  const profile = buildProfile();
 
   try {
     const resp = await fetch('/api/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ profile }),
+      body: JSON.stringify({ responses }),
     });
 
     const text = await resp.text();
